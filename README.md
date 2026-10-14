@@ -76,3 +76,7 @@ an additional app, follow `skills/protect-data-app/SKILL.md`.
 ## Status
 
 This is a preview. Interfaces, table schemas and the deployment flow may still change.
+
+## License
+
+[MIT](LICENSE)
