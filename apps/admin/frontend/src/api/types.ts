@@ -13,8 +13,11 @@ export const appSchema = z.object({
   config_id: z.string(),
   source: z.string(),
   active: z.boolean(),
+  /** "grants": only granted principals; "all_signed_in": anyone the IdP signed in. */
+  access: z.enum(['grants', 'all_signed_in']).default('grants'),
 });
 export type App = z.infer<typeof appSchema>;
+export type AppAccess = App['access'];
 
 export const userSchema = z.object({
   email: z.string(),

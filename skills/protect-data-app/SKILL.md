@@ -16,16 +16,25 @@ by an administrator in the **Access admin** app. (That split comes from the
 product brief: asking for groups at creation time is the wrong place — the
 admin app is the source of truth.)
 
+The one question it does ask: **is the app for everyone who has an account in
+the identity provider?** Some apps (a company-wide report) are meant for the
+whole company; granting everyone one by one would defeat the point. Such an
+app is registered with `access = all_signed_in`: the gate still runs and
+requires a signed-in user (and still blocks deactivated users), but no grant
+is needed. An admin can switch it either way later in **Access admin → Apps →
+Edit → Open to everyone signed in**.
+
 ## Checklist
 
 Copy into the reply and tick off:
 
 - [ ] 1. Pick the app id (lowercase, `[a-z0-9_-]`, ≤ 64) and confirm it with the user
+- [ ] 1b. Ask: "For everyone with an account in the IdP, or only for users granted in Access admin?"
 - [ ] 2. Add the gate to every route
 - [ ] 3. If the app reads warehouse data: route every query through the data guard
 - [ ] 4. Keep the Keboola health check (`POST /` → 200) outside the gate
-- [ ] 5. Register the app (no grants)
-- [ ] 6. Tell the user to grant access in the Access admin app, and how to test it
+- [ ] 5. Register the app (no grants; `--access all_signed_in` if the answer to 1b was "everyone")
+- [ ] 6. Tell the user to grant access in the Access admin app (or that everyone signed in can open it), and how to test it
 
 ## 1. App id
 
@@ -123,6 +132,10 @@ python -m kbc_access.cli register-app --app-id drug-sales-v2 --name "Drug sales 
 
 It prints `"grants": "none — grant access in the admin app"`. That is correct.
 Until someone grants access, everyone gets the deny page — the safe default.
+
+For an app the user wants open to everyone signed in (step 1b), add
+`--access all_signed_in`; it prints `"grants": "not needed — everyone signed in
+may open it"`. Ask rather than assume: the default stays "grants only".
 
 ## 6. Hand-off to the user
 

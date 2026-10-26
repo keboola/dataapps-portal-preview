@@ -9,6 +9,11 @@ export function DecisionBadge({ allowed }: { allowed: boolean }) {
   return allowed ? <Badge color="green">allowed</Badge> : <Badge color="red">denied</Badge>;
 }
 
+/** Shown only for an app anyone signed in may open; the default (grants) needs no mark. */
+export function AccessBadge({ access }: { access: 'grants' | 'all_signed_in' }) {
+  return access === 'all_signed_in' ? <Badge color="amber">everyone signed in</Badge> : null;
+}
+
 export function ActiveBadge({ active }: { active: boolean }) {
   return active ? <Badge color="green">active</Badge> : <Badge color="red">inactive</Badge>;
 }

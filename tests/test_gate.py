@@ -18,7 +18,7 @@ from kbc_access.gate import (
     decide,
 )
 from kbc_access.identity import Principal
-from kbc_access.store import AccessStore, App
+from kbc_access.store import ACCESS_ALL_SIGNED_IN, AccessStore, App
 
 FINANCE = "3f2b8c1e-7d4a-4e5b-9a61-2c8d0f4e1b7a"
 SUPPLY = "5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9"
@@ -37,6 +37,27 @@ def store(settings: Settings, tmp_path: Path) -> AccessStore:
 
 def _p(email: str, *groups: str) -> Principal:
     return Principal(email, frozenset(groups))
+
+
+def test_all_signed_in_app_needs_no_grant(store: AccessStore) -> None:
+    store.upsert_app(App("everyone", "Everyone", "u", "p", "c", "manual", True, ACCESS_ALL_SIGNED_IN))
+    d = decide(store.snapshot(), _p("someone@nowhere.example"), "everyone")
+    assert (d.allowed, d.reason, d.matched) == (True, ALLOWED, ("access:all_signed_in",))
+    # Other apps still need a grant.
+    assert decide(store.snapshot(), _p("someone@nowhere.example"), "sales").reason == NO_GRANT
+
+
+def test_all_signed_in_still_blocks_deactivated_users_and_inactive_apps(store: AccessStore) -> None:
+    store.upsert_app(App("everyone", "Everyone", "u", "p", "c", "manual", True, ACCESS_ALL_SIGNED_IN))
+    store.upsert_app(App("off-all", "Off", "u", "p", "c", "manual", False, ACCESS_ALL_SIGNED_IN))
+    store.upsert_user("olga@a.example", "Olga", False)
+    assert decide(store.snapshot(), _p("olga@a.example"), "everyone").reason == USER_DEACTIVATED
+    assert decide(store.snapshot(), _p("jan@b.example"), "off-all").reason == APP_INACTIVE
+
+
+def test_launcher_lists_all_signed_in_apps_for_everyone(store: AccessStore) -> None:
+    store.upsert_app(App("everyone", "Everyone", "u", "p", "c", "manual", True, ACCESS_ALL_SIGNED_IN))
+    assert [a.app_id for a in accessible_apps(store.snapshot(), _p("nobody@x.example"))] == ["everyone"]
 
 
 def test_user_grant(store: AccessStore) -> None:

@@ -359,6 +359,30 @@ def test_invalid_app_id_shows_error(client, admin):
     assert response.status_code == 400 and "App ID must be lowercase" in response.json()["detail"]
 
 
+def test_app_access_set_kept_on_edit_and_toggle(client, admin, runtime):
+    def access() -> str:
+        return {a.app_id: a for a in runtime.store.list_apps()}["hr"].access
+
+    client.post("/api/apps", json={"app_id": "hr", "name": "HR", "active": True}, headers=admin)
+    assert access() == "grants"
+    client.post("/api/apps", json={"app_id": "hr", "name": "HR", "active": True, "access": "all_signed_in"}, headers=admin)
+    assert access() == "all_signed_in"
+    listed = {a["app_id"]: a for a in client.get("/api/apps", headers=admin).json()["apps"]}
+    assert listed["hr"]["access"] == "all_signed_in"
+    # An edit without the field and an activate/deactivate keep it.
+    client.post("/api/apps", json={"app_id": "hr", "name": "HR board", "active": True}, headers=admin)
+    assert access() == "all_signed_in"
+    client.post("/api/apps/hr/toggle", headers=admin)
+    assert access() == "all_signed_in"
+    client.post("/api/apps", json={"app_id": "hr", "name": "HR board", "active": True, "access": "grants"}, headers=admin)
+    assert access() == "grants"
+
+
+def test_invalid_app_access_shows_error(client, admin):
+    response = client.post("/api/apps", json={"app_id": "hr", "name": "HR", "access": "public"}, headers=admin)
+    assert response.status_code == 400 and "Unknown app access 'public'" in response.json()["detail"]
+
+
 # ---- simulator ----------------------------------------------------------
 
 

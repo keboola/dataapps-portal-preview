@@ -2,8 +2,10 @@
 
 Access is the union of grants to the user's email, to every IdP group the
 principal carries and to every local group the user is a member of (resolved
-from the snapshot by email). Everything else is a denial, and every denial has a
-reason code so the audit log and the deny page can say why.
+from the snapshot by email) - unless the app is marked "all signed in", which
+lets in anyone the IdP signed in without looking at grants. Everything else is a
+denial, and every denial has a reason code so the audit log and the deny page can
+say why.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from threading import Lock
 from typing import Protocol
 
 from kbc_access.identity import Principal
-from kbc_access.store import AclSnapshot, App
+from kbc_access.store import ACCESS_ALL_SIGNED_IN, AclSnapshot, App
 
 # Reason codes (stable strings — they appear in audit lines).
 ALLOWED = "allowed"
@@ -30,7 +32,8 @@ class GateDecision:
     allowed: bool
     reason: str
     app_id: str
-    # "user:<email>" / "group:<group_id>" / "local_group:<local_group_id>" for each grant that matched.
+    # "user:<email>" / "group:<group_id>" / "local_group:<local_group_id>" for each grant that matched,
+    # or "access:all_signed_in" when the app needs no grant.
     matched: tuple[str, ...]
 
 
@@ -44,6 +47,9 @@ def decide(snapshot: AclSnapshot, principal: Principal, app_id: str) -> GateDeci
     user = snapshot.users.get(principal.email)
     if user is not None and not user.active:
         return GateDecision(False, USER_DEACTIVATED, app_id, ())
+    # The principal exists only because the apps-proxy signed it in, so that is all such an app needs.
+    if app.access == ACCESS_ALL_SIGNED_IN:
+        return GateDecision(True, ALLOWED, app_id, (f"access:{ACCESS_ALL_SIGNED_IN}",))
 
     member_of = {
         group.group_id

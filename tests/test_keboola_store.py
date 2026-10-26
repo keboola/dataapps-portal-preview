@@ -17,7 +17,7 @@ from kbc_access.gate import decide
 from kbc_access.identity import Principal
 from kbc_access.keboola_storage import StorageError
 from kbc_access.keboola_store import KeboolaAccessStore, storage_columns, storage_primary_key
-from kbc_access.store import TABLE_COLUMNS, AccessStore, App, StoreError
+from kbc_access.store import ACCESS_ALL_SIGNED_IN, ACCESS_GRANTS, TABLE_COLUMNS, AccessStore, App, StoreError
 from tests.fake_storage_api import FakeStorageApi
 
 BUCKET = "in.c-apps-control-plane"
@@ -78,6 +78,40 @@ def test_ensure_schema_creates_all_tables_with_row_key(api: FakeStorageApi, sett
     assert api.tables[f"{BUCKET}.app_grants"].primary_key == ["row_key"]
     assert api.tables[f"{BUCKET}.user_attributes"].primary_key == ["row_key"]
     assert api.tables[f"{BUCKET}.apps"].primary_key == ["app_id"]
+
+
+OLD_APPS_COLUMNS = ["app_id", "name", "url", "project_id", "config_id", "source", "active"]
+
+
+def test_bucket_from_before_access_column_reads_and_upgrades(api: FakeStorageApi, settings: Settings) -> None:
+    """A bucket installed before apps.access: reads default to grants, the first write adds the column."""
+    KeboolaAccessStore(api.client(), BUCKET, settings.providers, read_cache_seconds=0).ensure_schema()
+    apps = api.tables[f"{BUCKET}.apps"]
+    apps.columns = list(OLD_APPS_COLUMNS)
+    apps.rows = [{"app_id": "legacy", "name": "Legacy", "url": "u", "project_id": "p", "config_id": "c",
+                  "source": "discovered", "active": "1"}]
+    kstore = KeboolaAccessStore(api.client(), BUCKET, settings.providers, read_cache_seconds=0)
+    assert kstore.list_apps()[0].access == ACCESS_GRANTS
+    assert api.added_columns == []  # reading never changes the schema
+
+    kstore.upsert_app(App("everyone", "Everyone", "u", "p", "c", "manual", True, ACCESS_ALL_SIGNED_IN))
+    assert api.added_columns == [(f"{BUCKET}.apps", "access")]
+    assert apps.columns == [*OLD_APPS_COLUMNS, "access"]
+    by_id = {r["app_id"]: r for r in rows(api, "apps")}
+    assert by_id["everyone"]["access"] == "all_signed_in"
+    assert by_id["legacy"]["access"] == ""  # untouched row: empty in Storage, read as grants
+    assert {a.app_id: a.access for a in kstore.list_apps()} == {"legacy": "grants", "everyone": "all_signed_in"}
+
+    kstore.upsert_app(App("second", "Second", "u", "p", "c", "manual", True))
+    assert len(api.added_columns) == 1  # checked once per process
+
+
+def test_ensure_schema_adds_missing_columns(api: FakeStorageApi, settings: Settings) -> None:
+    kstore = KeboolaAccessStore(api.client(), BUCKET, settings.providers, read_cache_seconds=0)
+    kstore.ensure_schema()
+    api.tables[f"{BUCKET}.apps"].columns = list(OLD_APPS_COLUMNS)
+    assert kstore.ensure_schema() == []
+    assert api.tables[f"{BUCKET}.apps"].columns == storage_columns("apps")
     assert "row_key" not in api.tables[f"{BUCKET}.users"].columns
 
 

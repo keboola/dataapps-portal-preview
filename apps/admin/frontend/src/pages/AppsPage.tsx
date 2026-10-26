@@ -1,6 +1,7 @@
 /**
  * Apps: the registry of Data Apps the gate knows. Create and edit in a modal (upsert on the
  * server; editing keeps the app's source), activate / deactivate, delete with its grants.
+ * An app can be opened to everyone the IdP signs in, so nobody has to grant the whole company.
  */
 import { useState } from 'react';
 import { z } from 'zod';
@@ -22,7 +23,7 @@ import { errorMessage } from '../api/client';
 import { useApps, useDeleteApp, useSaveApp, useToggleApp } from '../api/hooks';
 import type { App } from '../api/types';
 import { ActionFeedbackScope, usePageAction } from '../components/actionFeedback';
-import { ActiveBadge } from '../components/Badges';
+import { AccessBadge, ActiveBadge } from '../components/Badges';
 import { Code, NameWithId } from '../components/Code';
 import { ConfirmButton } from '../components/ConfirmButton';
 import { LoadError, PageSkeleton } from '../components/PageStates';
@@ -47,11 +48,13 @@ function AppForm({ editing, onDone }: { editing: App | null; onDone: () => void 
       project_id: editing?.project_id ?? '',
       config_id: editing?.config_id ?? '',
       active: editing ? editing.active : true,
+      all_signed_in: editing?.access === 'all_signed_in',
     },
     canSubmitWhenInvalid: true,
     onSubmit: async ({ value, formApi }) => {
+      const { all_signed_in: allSignedIn, ...rest } = value;
       try {
-        const result = await save.mutateAsync(value);
+        const result = await save.mutateAsync({ ...rest, access: allSignedIn ? 'all_signed_in' : 'grants' });
         toast.success(result.message);
         onDone();
       } catch (error) {
@@ -85,6 +88,13 @@ function AppForm({ editing, onDone }: { editing: App | null; onDone: () => void 
               <form.AppField name="config_id">{(field) => <field.TextField label="Config ID" />}</form.AppField>
             </div>
             <form.AppField name="active">{(field) => <field.SwitchField>Active</field.SwitchField>}</form.AppField>
+            <form.AppField name="all_signed_in">
+              {(field) => <field.SwitchField>Open to everyone signed in</field.SwitchField>}
+            </form.AppField>
+            <p className="tw:text-sm tw:text-muted-foreground">
+              Anyone the identity provider signs in may open the app, without a grant. Deactivated users stay
+              blocked. Leave off to allow only users and groups granted on the Grants page.
+            </p>
             <form.SubmitErrorAlert />
           </form.FormBody>
         </form.AppForm>
@@ -124,7 +134,10 @@ function AppRow({ app, onEdit }: { app: App; onEdit: () => void }) {
       </Table.Cell>
       <Table.Cell>{app.source}</Table.Cell>
       <Table.Cell>
-        <ActiveBadge active={app.active} />
+        <div className="tw:flex tw:flex-wrap tw:gap-1">
+          <ActiveBadge active={app.active} />
+          <AccessBadge access={app.access} />
+        </div>
       </Table.Cell>
       <Table.Cell>
         <div className="tw:flex tw:flex-wrap tw:justify-end tw:gap-2">

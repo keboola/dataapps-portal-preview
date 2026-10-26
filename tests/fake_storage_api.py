@@ -121,6 +121,7 @@ class FakeStorageApi:
         self.imports: list[tuple[str, int]] = []  # (table_id, rows in the file) per import job
         self.deletes: list[tuple[str, list[str]]] = []  # (table_id, where values) per delete job
         self.created_tables: list[str] = []
+        self.added_columns: list[tuple[str, str]] = []  # (table_id, column) per add-column job
         # Failure injection.
         self.http_failures: list[HttpFailure] = []
         self.job_failures: list[JobFailureRule] = []
@@ -221,6 +222,11 @@ class FakeStorageApi:
                 return self._json(listed)
             if method == "POST" and rest[2:] == ["tables-async"]:
                 return self._tables_async(bucket_id, request)
+        if rest[:1] == ["tables"] and len(rest) == 2 and method == "GET":
+            if rest[1] not in self.tables:
+                return self._error(404, f"Table {rest[1]} not found")
+            table = self.tables[rest[1]]
+            return self._json({"id": table.table_id, "columns": list(table.columns), "primaryKey": table.primary_key})
         if rest[:1] == ["tables"] and len(rest) == 3:
             table_id, action = rest[1], rest[2]
             if table_id not in self.tables:
@@ -231,6 +237,8 @@ class FakeStorageApi:
                 return self._import_async(self.tables[table_id], request)
             if method == "DELETE" and action == "rows":
                 return self._delete_rows(self.tables[table_id], request)
+            if method == "POST" and action == "columns":
+                return self._add_column(self.tables[table_id], request)
         return self._error(404, f"No fake route for {method} {path}")
 
     # ---- responses -----------------------------------------------------------
@@ -382,6 +390,19 @@ class FakeStorageApi:
                     table.rows.append(clean)
 
         return self._new_job("import", table.table_id, apply)
+
+    def _add_column(self, table: FakeTable, request: httpx.Request) -> httpx.Response:
+        name = self._form(request)["name"]
+
+        def apply() -> None:
+            if name in table.columns:
+                raise JobFailure(f"Column {name} already exists")
+            self.added_columns.append((table.table_id, name))
+            table.columns.append(name)
+            for row in table.rows:
+                row[name] = ""
+
+        return self._new_job("add_column", table.table_id, apply)
 
     def _delete_rows(self, table: FakeTable, request: httpx.Request) -> httpx.Response:
         column = request.url.params.get("whereColumn")

@@ -90,7 +90,7 @@ One JSON line per decision to `logs/`, for both gate and guard: timestamp, email
 
 | Table | Columns | Written by |
 |---|---|---|
-| `apps` | app_id, name, url, project_id, config_id, source (`manual`\|`discovered`), active | admin app; discovery |
+| `apps` | app_id, name, url, project_id, config_id, source (`manual`\|`discovered`), active, access (`grants`\|`all_signed_in`; added 2026-10, a missing value reads as `grants`) | admin app; discovery |
 | `users` | email, display_name, active | admin app (manual, brief 04:01) |
 | `groups` | group_id, provider (`entra`\|`okta`), external_id, name | admin app (manual, validated by provider template) |
 | `app_grants` | app_id, subject_type (`user`\|`group`), subject_id, granted_by, granted_at | admin app |

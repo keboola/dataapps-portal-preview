@@ -40,7 +40,7 @@ from kbc_access.config import Settings
 from kbc_access.discovery import DiscoveredApp, DiscoveryError, discover
 from kbc_access.gate import GateDecision, decide
 from kbc_access.identity import Principal
-from kbc_access.store import SUBJECT_TYPES, App, Group, LocalGroup, StoreError
+from kbc_access.store import ACCESS_GRANTS, SUBJECT_TYPES, App, Group, LocalGroup, StoreError
 from kbc_access.web import Access, Runtime, build_runtime, install, mount_spa, require_csrf_header
 
 APP_ID = "admin"
@@ -70,6 +70,8 @@ class AppIn(BaseModel):
     project_id: str = ""
     config_id: str = ""
     active: bool = False
+    # "grants" or "all_signed_in"; left out, an edit keeps the app's current value.
+    access: str | None = None
 
 
 class ImportItem(BaseModel):
@@ -290,10 +292,11 @@ def create_app(
         existing = _apps_by_id().get(app_id)
         # Editing keeps the app's origin; anything created here is manual.
         source = existing.source if existing else "manual"
+        app_access = body.access if body.access is not None else (existing.access if existing else ACCESS_GRANTS)
         try:
             store.upsert_app(
                 App(app_id, body.name, body.url.strip(), body.project_id.strip(), body.config_id.strip(), source,
-                    body.active)
+                    body.active, app_access.strip())
             )
         except StoreError as exc:
             raise _fail(400, str(exc)) from exc
@@ -307,7 +310,7 @@ def create_app(
             raise _fail(404, f"Unknown app '{app_id}'.")
         store.upsert_app(
             App(current.app_id, current.name, current.url, current.project_id, current.config_id,
-                current.source, not current.active)
+                current.source, not current.active, current.access)
         )
         audit.admin(email=principal.email, action="app_activate" if not current.active else "app_deactivate", target=app_id)
         return {"message": f"App '{app_id}' {'activated' if not current.active else 'deactivated'}."}

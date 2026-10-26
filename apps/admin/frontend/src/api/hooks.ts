@@ -213,6 +213,7 @@ export type AppInput = {
   project_id: string;
   config_id: string;
   active: boolean;
+  access: 'grants' | 'all_signed_in';
 };
 
 export const useSaveApp = () =>

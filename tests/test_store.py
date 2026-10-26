@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from kbc_access.config import Settings
-from kbc_access.store import AccessStore, App, StoreError
+import sqlite3
+
+from kbc_access.store import ACCESS_ALL_SIGNED_IN, ACCESS_GRANTS, AccessStore, App, StoreError
 
 FINANCE = "3f2b8c1e-7d4a-4e5b-9a61-2c8d0f4e1b7a"
 SUPPLY = "5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9"
@@ -49,6 +51,46 @@ def test_app_name_and_source_validated(store: AccessStore) -> None:
     with pytest.raises(StoreError):
         store.upsert_app(App("x", "X", "u", "p", "c", "imported", True))
     store.upsert_app(App("x", "X", "u", "p", "c", "discovered", True))
+
+
+def test_app_access_defaults_to_grants_and_round_trips(store: AccessStore) -> None:
+    store.upsert_app(_app("sales"))
+    store.upsert_app(App("all", "All", "u", "p", "c", "manual", True, ACCESS_ALL_SIGNED_IN))
+    by_id = {a.app_id: a for a in store.list_apps()}
+    assert by_id["sales"].access == ACCESS_GRANTS
+    assert by_id["all"].access == ACCESS_ALL_SIGNED_IN
+    assert store.snapshot().apps["all"].access == ACCESS_ALL_SIGNED_IN
+    assert {r["app_id"]: r["access"] for r in store.dump_rows("apps")} == {"sales": "grants", "all": "all_signed_in"}
+
+
+def test_app_access_validated(store: AccessStore) -> None:
+    with pytest.raises(StoreError, match="Unknown app access 'public'"):
+        store.upsert_app(App("x", "X", "u", "p", "c", "manual", True, "public"))
+
+
+def test_load_rows_without_access_reads_as_grants(store: AccessStore) -> None:
+    """Rows from a backend written before apps.access existed have no value for it."""
+    store.load_rows("apps", [{"app_id": "old", "name": "Old", "url": "u", "project_id": "p", "config_id": "c",
+                              "source": "discovered", "active": "1"}])
+    assert store.list_apps()[0].access == ACCESS_GRANTS
+
+
+def test_store_created_before_access_column_is_migrated(settings: Settings, tmp_path: Path) -> None:
+    path = tmp_path / "old.sqlite"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """CREATE TABLE apps (app_id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL,
+               project_id TEXT NOT NULL, config_id TEXT NOT NULL,
+               source TEXT NOT NULL CHECK (source IN ('manual', 'discovered')),
+               active INTEGER NOT NULL CHECK (active IN (0, 1)))"""
+        )
+        conn.execute("INSERT INTO apps VALUES ('legacy', 'Legacy', 'u', 'p', 'c', 'manual', 1)")
+    conn.close()
+    store = AccessStore(path, settings.providers)
+    assert store.list_apps()[0].access == ACCESS_GRANTS
+    store.upsert_app(App("legacy", "Legacy", "u", "p", "c", "manual", True, ACCESS_ALL_SIGNED_IN))
+    assert store.list_apps()[0].access == ACCESS_ALL_SIGNED_IN
+    AccessStore(path, settings.providers)  # migrating twice is a no-op
 
 
 def test_delete_app_cascades_grants(store: AccessStore) -> None:

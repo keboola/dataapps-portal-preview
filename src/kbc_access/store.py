@@ -40,6 +40,11 @@ logger = logging.getLogger(__name__)
 
 SUBJECT_TYPES = ("user", "group", "local_group")
 APP_SOURCES = ("manual", "discovered")
+# Who may open an app: only principals with a matching grant (the default), or anyone the
+# IdP signed in - for apps meant for the whole company, so nobody has to add everyone.
+ACCESS_GRANTS = "grants"
+ACCESS_ALL_SIGNED_IN = "all_signed_in"
+APP_ACCESS = (ACCESS_GRANTS, ACCESS_ALL_SIGNED_IN)
 # Dataset security (row access lines and column masks). Limits on what one admin save may carry.
 ROW_LINES_MAX_PER_DATASET = 100
 MASK_LINES_MAX_PER_DATASET = 200
@@ -59,6 +64,9 @@ CREATE TABLE IF NOT EXISTS app_grants (
 );
 """
 
+# Also used by the migration that adds the column to a store created before it existed.
+APPS_ACCESS_DDL = "access TEXT NOT NULL DEFAULT 'grants' CHECK (access IN ('grants', 'all_signed_in'))"
+
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS apps (
     app_id TEXT PRIMARY KEY,
@@ -67,7 +75,8 @@ CREATE TABLE IF NOT EXISTS apps (
     project_id TEXT NOT NULL,
     config_id TEXT NOT NULL,
     source TEXT NOT NULL CHECK (source IN ('manual', 'discovered')),
-    active INTEGER NOT NULL CHECK (active IN (0, 1))
+    active INTEGER NOT NULL CHECK (active IN (0, 1)),
+    {APPS_ACCESS_DDL}
 );
 CREATE TABLE IF NOT EXISTS users (
     email TEXT PRIMARY KEY,
@@ -122,7 +131,7 @@ CREATE TABLE IF NOT EXISTS column_masks (
 # Column order per table; shared by every backend that mirrors these tables. The
 # dict order is the write order of a mirror: parents before the rows that reference them.
 TABLE_COLUMNS: dict[str, list[str]] = {
-    "apps": ["app_id", "name", "url", "project_id", "config_id", "source", "active"],
+    "apps": ["app_id", "name", "url", "project_id", "config_id", "source", "active", "access"],
     "users": ["email", "display_name", "active"],
     "groups": ["group_id", "provider", "external_id", "name"],
     "local_groups": ["local_group_id", "name", "description"],
@@ -147,7 +156,13 @@ TABLE_KEYS: dict[str, list[str]] = {
 _INT_COLUMNS = {("apps", "active"), ("users", "active")}
 
 
+# A column added by a newer release reads as empty from a backend written by an older one.
+_EMPTY_DEFAULTS = {("apps", "access"): ACCESS_GRANTS}
+
+
 def _from_text(table: str, column: str, value: str) -> object:
+    if value == "" and (table, column) in _EMPTY_DEFAULTS:
+        return _EMPTY_DEFAULTS[(table, column)]
     return int(value) if (table, column) in _INT_COLUMNS else value
 
 
@@ -164,6 +179,7 @@ class App:
     config_id: str
     source: str
     active: bool
+    access: str = ACCESS_GRANTS
 
 
 @dataclass(frozen=True)
@@ -386,6 +402,7 @@ class AccessStore:
         with self._conn() as conn:
             conn.executescript(SCHEMA)
             self._migrate_app_grants(conn)
+            self._migrate_apps_access(conn)
 
     @staticmethod
     def _migrate_app_grants(conn: sqlite3.Connection) -> None:
@@ -400,6 +417,13 @@ class AccessStore:
         conn.executescript(APP_GRANTS_DDL)
         conn.execute("INSERT INTO app_grants SELECT * FROM app_grants_old")
         conn.execute("DROP TABLE app_grants_old")
+
+    @staticmethod
+    def _migrate_apps_access(conn: sqlite3.Connection) -> None:
+        """Add apps.access to a store created before it existed; existing apps keep needing grants."""
+        columns = {r["name"] for r in conn.execute("PRAGMA table_info(apps)").fetchall()}
+        if "access" not in columns:
+            conn.execute(f"ALTER TABLE apps ADD COLUMN {APPS_ACCESS_DDL}")
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -439,14 +463,17 @@ class AccessStore:
             raise StoreError("App name is required")
         if app.source not in APP_SOURCES:
             raise StoreError(f"Unknown app source '{app.source}'")
+        if app.access not in APP_ACCESS:
+            raise StoreError(f"Unknown app access '{app.access}'. Known: {', '.join(APP_ACCESS)}")
         with self._conn() as conn:
             conn.execute(
-                """INSERT INTO apps (app_id, name, url, project_id, config_id, source, active)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                """INSERT INTO apps (app_id, name, url, project_id, config_id, source, active, access)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT (app_id) DO UPDATE SET name = excluded.name, url = excluded.url,
                      project_id = excluded.project_id, config_id = excluded.config_id,
-                     source = excluded.source, active = excluded.active""",
-                (app.app_id, app.name.strip(), app.url, app.project_id, app.config_id, app.source, int(app.active)),
+                     source = excluded.source, active = excluded.active, access = excluded.access""",
+                (app.app_id, app.name.strip(), app.url, app.project_id, app.config_id, app.source, int(app.active),
+                 app.access),
             )
 
     def delete_app(self, app_id: str) -> None:

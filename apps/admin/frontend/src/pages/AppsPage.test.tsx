@@ -26,8 +26,30 @@ describe('AppsPage', () => {
       project_id: '',
       config_id: '',
       active: true,
+      access: 'grants',
     });
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('opens an app to everyone signed in and marks it in the list', async () => {
+    const { calls } = mockFetch({
+      'GET /api/session': { body: SESSION },
+      'GET /api/apps': { body: { apps: [APP_SALES, { ...APP_HR, access: 'all_signed_in' }] } },
+      'POST /api/apps': { body: { message: "App 'sales' saved." } },
+    });
+    const user = userEvent.setup();
+    renderApp('/apps');
+    const hrRow = (await screen.findByRole('button', { name: 'Edit hr' })).closest('tr')!;
+    expect(within(hrRow).getByText('everyone signed in')).toBeInTheDocument();
+    const salesRow = screen.getByRole('button', { name: 'Edit sales' }).closest('tr')!;
+    expect(within(salesRow).queryByText('everyone signed in')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Edit sales' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('switch', { name: /Open to everyone signed in/ }));
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText("App 'sales' saved.")).toBeInTheDocument();
+    expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ app_id: 'sales', access: 'all_signed_in' });
   });
 
   it('rejects an app ID outside the pattern without calling the server', async () => {
@@ -59,7 +81,7 @@ describe('AppsPage', () => {
     expect(within(dialog).queryByLabelText(/App ID/)).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Save' }));
     expect(await screen.findByText("App 'hr' saved.")).toBeInTheDocument();
-    expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ app_id: 'hr', active: false });
+    expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ app_id: 'hr', active: false, access: 'grants' });
   });
 
   it('toggles and deletes an app', async () => {

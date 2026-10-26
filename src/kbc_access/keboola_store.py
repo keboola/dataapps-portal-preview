@@ -105,6 +105,8 @@ class KeboolaAccessStore:
         self._orphan_grants: set[str] = set()
         # Control-plane tables the last pull did not find in the bucket.
         self._absent_tables: list[str] = []
+        # Set once every existing table is known to have every column this release writes.
+        self._columns_checked = False
 
     def table_id(self, table: str) -> str:
         return f"{self._bucket}.{table}"
@@ -116,12 +118,34 @@ class KeboolaAccessStore:
         return [t for t in TABLE_COLUMNS if t not in existing]
 
     def ensure_schema(self) -> list[str]:
-        """Create any missing control-plane table. Returns the names it created."""
+        """Create any missing control-plane table and add missing columns to the existing ones.
+
+        Returns the names of the tables it created.
+        """
+        missing = self.missing_tables()
         created = []
-        for table in self.missing_tables():
+        for table in missing:
             self._client.create_table(self._bucket, table, storage_columns(table), [storage_primary_key(table)])
             created.append(table)
+        self.ensure_columns(skip=missing)
         return created
+
+    def ensure_columns(self, *, skip: list[str] | None = None) -> list[str]:
+        """Add the columns a newer release introduced (apps.access) to tables created before it.
+
+        An incremental load whose header has a column the table lacks fails, so this runs
+        before the first write. Returns "table.column" for every column it added.
+        """
+        added = []
+        existing = set(self._client.list_tables(self._bucket)) - set(skip or [])
+        for table in (t for t in TABLE_COLUMNS if t in existing):
+            have = set(self._client.table_columns(self.table_id(table)))
+            for column in storage_columns(table):
+                if column not in have:
+                    self._client.add_column(self.table_id(table), column)
+                    added.append(f"{table}.{column}")
+        self._columns_checked = True
+        return added
 
     # ---- mirror ----------------------------------------------------------------
 
@@ -169,6 +193,8 @@ class KeboolaAccessStore:
             self._mirror = None  # whatever happens next, do not serve the pre-write state
             if self._absent_tables:
                 self.ensure_schema()
+            elif not self._columns_checked:
+                self.ensure_columns()
             for table in order:
                 changed = [
                     _with_row_key(table, row) for key, row in after[table].items() if before[table].get(key) != row
