@@ -154,24 +154,22 @@ uv run --with httpx --with pydantic --with pyyaml --with duckdb python scripts/i
   [--grant-group-provider entra --grant-group-id <group id> --grant-group-name <name>]
 ```
 
-**Precondition:** the project feature **Data Apps Storage Access** must be on
-(Project Settings → Features; API name `data-apps-storage-workspace`). Ask the
-user to confirm it before `--yes`; without it the dashboards cannot start.
-
 What it does: generates the demo tables and (re)loads them into the demo
 bucket; creates **Drug sales dashboard** and **Supply chain dashboard** on
 managed git; gives them **Direct Storage Access** to the demo tables
-(`storage.output.tables` with `unload_strategy: "direct-grant"` — never input
-mapping); at start and every 30 minutes each dashboard pulls the tables through
-the Query Service into a local DuckDB and the data guard serves every query from
-it (the Keboola "DuckDB-cached RO" pattern); gives them a Storage token that can
-only **read** the access tables (`#ACCESS_STORAGE_TOKEN` — never `#KBC_TOKEN`,
-which the runtime reserves for its own token); copies the admin app's login
-(OIDC etc.) when it has one; deploys; registers both dashboards and grants them
-to the group; finally gives the **Access admin** read access to the demo tables too
-and redeploys it, so its security editor can preview what a user sees. Note: Keboola's direct grant is read **and** write on those
-tables — the dashboards' SQL is still read-only because every query goes
-through the rewriter, which accepts SELECT only.
+(`storage.output.tables` with `unload_strategy: "direct-grant"` and
+`runtime.workspace.enabled: true` — never input mapping); at start and every
+30 minutes each dashboard pulls the tables through the Query Service into a
+local DuckDB and the data guard serves every query from it (the Keboola
+"DuckDB-cached RO" pattern); gives them a Storage token that can only **read**
+the access tables (`#ACCESS_STORAGE_TOKEN` — never `#KBC_TOKEN`, which the
+runtime reserves for its own token); copies the admin app's login (OIDC etc.)
+when it has one; deploys; registers both dashboards and grants them to the
+group; finally gives the **Access admin** read access to the demo tables too and
+redeploys it, so its security editor can preview what a user sees. Note:
+Keboola's direct grant is read **and** write on those tables — the dashboards'
+SQL is still read-only because every query goes through the rewriter, which
+accepts SELECT only.
 
 Tell the user afterwards: row-level rules use the user attribute `company`
 (`PHARMA_A` / `PHARMA_B` / `PHARMA_C`) — set it per user in the admin app,
