@@ -639,8 +639,7 @@ def describe_phase2(plan: Phase2Plan, project: dict) -> dict:
         "demo_tables": list(DEMO_TABLES),
         "dashboards": {a: {"name": plan.names[a], "slug": plan.slugs[a], "size": plan.size,
                            "auto_suspend_seconds": plan.auto_suspend_seconds} for a in PHASE2_APPS},
-        "data_access": "Direct Storage Access (direct-grant) to the demo tables, pulled into DuckDB at start and every 30 min; "
-                       "requires the project feature 'Data Apps Storage Access'",
+        "data_access": "Direct Storage Access (direct-grant) to the demo tables, pulled into DuckDB at start and every 30 min",
         "storage_token": f"read-only access to {plan.bucket_id} (the access tables); stored as the dashboards' #ACCESS_STORAGE_TOKEN",
         "login": "copied from the Access admin app (a password placeholder if the admin has none yet)",
         "grant": f"{plan.grant_group_name} ({plan.grant_group_provider}: {plan.grant_group_id}) gets both dashboards"

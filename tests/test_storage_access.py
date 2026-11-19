@@ -55,6 +55,7 @@ def test_missing_storage_access_env_names_the_setting():
     with pytest.raises(StorageAccessError, match="Storage Access") as info:
         workspace_from_env({"KBC_TOKEN": "t", "BRANCH_ID": "1"})
     assert "QUERY_SERVICE_URL" in str(info.value) and "WORKSPACE_ID" in str(info.value)
+    assert "runtime.workspace.enabled" in str(info.value)
 
 
 def test_branch_id_must_be_numeric():
