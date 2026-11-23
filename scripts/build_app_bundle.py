@@ -24,6 +24,7 @@ Nothing is guessed: every value comes from an argument or from
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import shutil
 import sys
@@ -40,6 +41,8 @@ IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "node_
 NODE_VERSION = re.compile(r"^\d+\.\d+\.\d+$")
 # Highest phase of the suite whose apps this builder can deploy.
 BUILDABLE_PHASE = 2
+# Named in the header of the rendered deployed.toml.
+GENERATED_BY = "scripts/build_app_bundle.py"
 
 
 def _render(name: str, **values: str) -> str:
@@ -90,21 +93,60 @@ def _frontend_block(manifest: dict, frontend: str | None) -> str:
     return _render("setup_frontend.sh.tmpl", frontend_dir=frontend, node_min_version=node_min_version(manifest))
 
 
-def _apps_block(manifest: dict, app_urls: dict[str, str]) -> str:
-    """[apps.<id>] sections for every app with a known URL (the one being built included)."""
+def apps_section(entries: dict[str, dict[str, object]]) -> str:
+    """[apps.<id>] sections of deployed.toml, one per entry (keys: name, port, factory, protected, public_url).
+
+    Shared with skills/protect-data-app/scripts/vendor_access.py, which renders the
+    same config for an app that lives in its own repository.
+    """
     lines: list[str] = []
-    for app_id, url in sorted(app_urls.items()):
-        app = manifest["apps"][app_id]
+    for app_id, entry in sorted(entries.items()):
         lines += [
             "",
             f"[apps.{app_id}]",
-            f'name = "{app["name"]}"',
-            f"port = {manifest['internal_port']}",
-            f'factory = "{app["factory"]}"',
-            f"protected = {'false' if app_id == 'launcher' else 'true'}",
-            f'public_url = "{url}"',
+            f"name = {_toml_string(str(entry['name']))}",
+            f"port = {int(entry['port'])}",  # type: ignore[call-overload]
+            f"factory = {_toml_string(str(entry['factory']))}",
+            f"protected = {'true' if entry['protected'] else 'false'}",
+            f"public_url = {_toml_string(str(entry['public_url']))}",
         ]
     return "\n".join(lines) + "\n"
+
+
+def _toml_string(value: str) -> str:
+    """A TOML basic string (JSON string escaping is valid TOML for these values)."""
+    return json.dumps(value, ensure_ascii=False)
+
+
+def suite_app_entry(manifest: dict, app_id: str, url: str) -> dict[str, object]:
+    """The [apps.<id>] values of one suite app, as the bundles carry them."""
+    app = manifest["apps"][app_id]
+    return {
+        "name": app["name"], "port": manifest["internal_port"], "factory": app["factory"],
+        "protected": app_id != "launcher", "public_url": url,
+    }
+
+
+def _apps_block(manifest: dict, app_urls: dict[str, str]) -> str:
+    """[apps.<id>] sections for every app with a known URL (the one being built included)."""
+    return apps_section({app_id: suite_app_entry(manifest, app_id, url) for app_id, url in app_urls.items()})
+
+
+def render_deployed_config(
+    *, app_id: str, stack_url: str, bucket_id: str, roles_separator: str, data_block: str, apps_block: str,
+    generated_by: str,
+) -> str:
+    """config/deployed.toml from deploy/templates/deployed.toml.tmpl (Keboola Storage store, proxy identity)."""
+    return _render(
+        "deployed.toml.tmpl",
+        generated_by=generated_by,
+        app_id=app_id,
+        stack_url=stack_url.rstrip("/"),
+        bucket_id=bucket_id,
+        roles_separator=roles_separator,
+        data_block=data_block,
+        apps_block=apps_block,
+    )
 
 
 def _data_block(manifest: dict, data_bucket_id: str) -> str:
@@ -192,14 +234,14 @@ def build(
     port = str(manifest["internal_port"])
     (out / "config").mkdir(exist_ok=True)
     (out / "config" / "deployed.toml").write_text(
-        _render(
-            "deployed.toml.tmpl",
+        render_deployed_config(
             app_id=app_id,
-            stack_url=stack_url.rstrip("/"),
+            stack_url=stack_url,
             bucket_id=bucket_id,
             roles_separator=roles_separator,
             data_block=_app_data_block(manifest, app, data_bucket_id),
             apps_block=_apps_block(manifest, app_urls),
+            generated_by=GENERATED_BY,
         ),
         encoding="utf-8",
     )
