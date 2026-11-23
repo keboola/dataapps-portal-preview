@@ -5,9 +5,9 @@ table once through the Query Service into a local DuckDB file, serve every
 dashboard query (via the data guard) from that file, and refresh it in the
 background every `refresh_seconds`.
 
-Direct Storage Access must be enabled for the app (project feature "Data Apps
-Storage Access", API name `data-apps-storage-workspace`, and the tables listed in the app's config under `storage.output.tables`
-with `unload_strategy: "direct-grant"`). The runtime then injects the
+Direct Storage Access must be enabled in the app's config: `runtime.workspace.enabled`
+set to true and the tables listed under `storage.output.tables` with
+`unload_strategy: "direct-grant"`. The runtime then injects the
 environment this module reads — KBC_TOKEN (the platform's token, NOT the
 suite's own ACCESS_STORAGE_TOKEN), BRANCH_ID, QUERY_SERVICE_URL and the
 workspace (KBC_WORKSPACE_MANIFEST_PATH, falling back to WORKSPACE_ID). A missing
@@ -63,8 +63,8 @@ def workspace_from_env(env: Mapping[str, str]) -> Workspace:
         missing.append("KBC_WORKSPACE_MANIFEST_PATH / WORKSPACE_ID")
     if missing:
         raise StorageAccessError(
-            f"Direct Storage Access is not available ({', '.join(missing)} missing). Enable the project feature "
-            "'Data Apps Storage Access' and list the tables under storage.output.tables with unload_strategy 'direct-grant'."
+            f"Direct Storage Access is not available ({', '.join(missing)} missing). In the app's config, set "
+            "runtime.workspace.enabled to true and list the tables under storage.output.tables with unload_strategy 'direct-grant'."
         )
     if not env["BRANCH_ID"].isdigit():
         raise StorageAccessError(f"BRANCH_ID must be numeric for the Query Service (got {env['BRANCH_ID']!r})")
